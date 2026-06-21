@@ -10,6 +10,7 @@ permissions:
   contents: write   # needed so the release job can publish a GitHub Release
 
 jobs:
+  # Windows + Linux share near-identical steps, so they stay in one matrix.
   build:
     name: Build (${{ matrix.label }})
     runs-on: ${{ matrix.os }}
@@ -21,10 +22,6 @@ jobs:
             label: windows
           - os: ubuntu-22.04        # older base = wider glibc compatibility
             label: linux
-          - os: macos-13            # last Intel macOS runner image
-            label: macos-intel
-          - os: macos-latest        # Apple Silicon (arm64)
-            label: macos-arm
 
     steps:
       - name: Check out repo
@@ -33,7 +30,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.12'
 
       - name: Install Tk (Linux only)
         if: matrix.label == 'linux'
@@ -44,8 +41,6 @@ jobs:
 
       - name: Build GUI app
         run: pyinstaller --onefile --windowed --name ModMigrator mod_migrator_gui.py
-
-      # --- Package each platform's output into one clearly-named file ---
 
       - name: Package (Windows)
         if: matrix.label == 'windows'
@@ -61,27 +56,68 @@ jobs:
           cp dist/ModMigrator release-assets/ModMigrator-Linux
           chmod +x release-assets/ModMigrator-Linux
 
-      - name: Package (macOS Intel)
-        if: matrix.label == 'macos-intel'
-        run: |
-          mkdir -p release-assets
-          ditto -c -k --sequesterRsrc --keepParent dist/ModMigrator.app release-assets/ModMigrator-macOS-Intel.zip
-
-      - name: Package (macOS Apple Silicon)
-        if: matrix.label == 'macos-arm'
-        run: |
-          mkdir -p release-assets
-          ditto -c -k --sequesterRsrc --keepParent dist/ModMigrator.app release-assets/ModMigrator-macOS-AppleSilicon.zip
-
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ModMigrator-${{ matrix.label }}
           path: release-assets/*
 
+  # macOS: one universal2 binary (runs natively on Intel AND Apple Silicon).
+  # Built with the python.org universal2 framework build, because the Python
+  # provided by actions/setup-python is single-arch and can't produce a fat
+  # binary. The app is pure stdlib + tkinter, and the python.org build bundles
+  # a universal2 Tcl/Tk, so there are no architecture-mismatched dependencies.
+  build-macos:
+    name: Build (macOS universal2)
+    runs-on: macos-latest
+    env:
+      PY_VERSION: "3.12.8"
+      PY_BIN: /Library/Frameworks/Python.framework/Versions/3.12/bin/python3
+
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Install universal2 Python from python.org
+        run: |
+          set -euo pipefail
+          curl -fL -o python.pkg \
+            "https://www.python.org/ftp/python/${PY_VERSION}/python-${PY_VERSION}-macos11.pkg"
+          sudo installer -pkg python.pkg -target /
+          "${PY_BIN}" --version
+          echo "Platform tag:"
+          "${PY_BIN}" -c "import sysconfig; print(sysconfig.get_platform())"
+
+      - name: Install PyInstaller
+        run: |
+          set -euo pipefail
+          "${PY_BIN}" -m pip install --upgrade pip
+          "${PY_BIN}" -m pip install pyinstaller
+
+      - name: Build universal2 app
+        run: |
+          set -euo pipefail
+          "${PY_BIN}" -m PyInstaller --onefile --windowed \
+            --target-arch universal2 --name ModMigrator mod_migrator_gui.py
+          echo "Architectures in the built binary:"
+          lipo -archs "dist/ModMigrator.app/Contents/MacOS/ModMigrator"
+
+      - name: Package (macOS universal2)
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          ditto -c -k --sequesterRsrc --keepParent \
+            dist/ModMigrator.app release-assets/ModMigrator-macOS-Universal.zip
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ModMigrator-macos-universal
+          path: release-assets/*
+
   release:
     name: Publish GitHub Release
-    needs: build
+    needs: [ build, build-macos ]
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     steps:
