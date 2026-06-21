@@ -1,0 +1,101 @@
+name: Build Mod Migrator (Windows / macOS / Linux)
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ "v*" ]
+  workflow_dispatch: {}
+
+permissions:
+  contents: write   # needed so the release job can publish a GitHub Release
+
+jobs:
+  build:
+    name: Build (${{ matrix.label }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            label: windows
+          - os: ubuntu-22.04        # older base = wider glibc compatibility
+            label: linux
+          - os: macos-13            # last Intel macOS runner image
+            label: macos-intel
+          - os: macos-latest        # Apple Silicon (arm64)
+            label: macos-arm
+
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Tk (Linux only)
+        if: matrix.label == 'linux'
+        run: sudo apt-get update && sudo apt-get install -y python3-tk
+
+      - name: Install PyInstaller
+        run: pip install pyinstaller
+
+      - name: Build GUI app
+        run: pyinstaller --onefile --windowed --name ModMigrator mod_migrator_gui.py
+
+      # --- Package each platform's output into one clearly-named file ---
+
+      - name: Package (Windows)
+        if: matrix.label == 'windows'
+        shell: pwsh
+        run: |
+          mkdir release-assets
+          Copy-Item dist/ModMigrator.exe release-assets/ModMigrator-Windows.exe
+
+      - name: Package (Linux)
+        if: matrix.label == 'linux'
+        run: |
+          mkdir -p release-assets
+          cp dist/ModMigrator release-assets/ModMigrator-Linux
+          chmod +x release-assets/ModMigrator-Linux
+
+      - name: Package (macOS Intel)
+        if: matrix.label == 'macos-intel'
+        run: |
+          mkdir -p release-assets
+          ditto -c -k --sequesterRsrc --keepParent dist/ModMigrator.app release-assets/ModMigrator-macOS-Intel.zip
+
+      - name: Package (macOS Apple Silicon)
+        if: matrix.label == 'macos-arm'
+        run: |
+          mkdir -p release-assets
+          ditto -c -k --sequesterRsrc --keepParent dist/ModMigrator.app release-assets/ModMigrator-macOS-AppleSilicon.zip
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ModMigrator-${{ matrix.label }}
+          path: release-assets/*
+
+  release:
+    name: Publish GitHub Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all platform artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: ModMigrator-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          generate_release_notes: true
+          files: release-assets/*
