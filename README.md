@@ -21,9 +21,11 @@ Grab the latest build for your OS from the
 | OS | File |
 |---|---|
 | Windows | `ModMigrator-Windows.exe` |
-| macOS (Apple Silicon: M1/M2/M3/M4) | `ModMigrator-macOS-AppleSilicon.zip` |
-| macOS (Intel) | `ModMigrator-macOS-Intel.zip` |
+| macOS (Intel & Apple Silicon) | `ModMigrator-macOS-Universal.zip` |
 | Linux | `ModMigrator-Linux` |
+
+The macOS download is a single universal2 binary that runs natively on both
+Intel and Apple Silicon Macs.
 
 No installation, no Python required — just download and run.
 
@@ -95,8 +97,9 @@ builds the executable into a `dist/` folder next to the script.
 Or build it on every platform at once without owning any of those
 machines: pushing a tag like `v1.0.0` to this repo triggers
 [`.github/workflows/build.yml`](.github/workflows/build.yml), which builds
-Windows, Linux, and both Intel/Apple Silicon macOS executables on GitHub's
-free cloud runners and attaches them to a new GitHub Release automatically.
+Windows, Linux, and a universal2 macOS executable (one binary that runs on
+both Intel and Apple Silicon) on GitHub's free cloud runners and attaches
+them to a new GitHub Release automatically.
 
 ### Turning the Windows builder into an .exe (IExpress)
 
